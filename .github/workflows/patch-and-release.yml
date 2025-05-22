@@ -17,7 +17,7 @@ jobs:
 
     - uses: actions/setup-node@v4
       with:
-        node-version: '20'
+        node-version: '18'
 
     - id: download_installer
       run: |
@@ -30,61 +30,73 @@ jobs:
 
     - run: |
         $installerPath = "${{ steps.download_installer.outputs.INSTALLER_PATH }}"
-        Start-Process -FilePath "$installerPath" -Wait
+        Start-Process -FilePath "$installerPath" -ArgumentList "/S" -Wait
+      shell: pwsh
+
+    - run: |
+        Start-Sleep -Seconds 30
       shell: pwsh
       
     - run: |
-        Start-Sleep -Seconds 10
+        Start-Sleep -Seconds 60
         Stop-Process -Name "yandex*" -ErrorAction SilentlyContinue
       shell: pwsh
 
-    - id: verify_asar
+    - id: verify_source_asar
       run: |
-        $asarPath = Join-Path $env:LOCALAPPDATA 'Programs' 'YandexMusic' 'resources' 'app.asar'
-        if (-not (Test-Path $asarPath)) {
-            $asarPathProgramFiles = Join-Path $env:ProgramFiles 'Yandex Music' 'resources' 'app.asar'
-            if (Test-Path $asarPathProgramFiles) {
-                $asarPath = $asarPathProgramFiles
+        $sourceAsarPath = Join-Path $env:LOCALAPPDATA 'Programs' 'YandexMusic' 'resources' 'app.asar'
+        if (-not (Test-Path $sourceAsarPath)) {
+            $sourceAsarPathProgramFiles = Join-Path $env:ProgramFiles 'Yandex Music' 'resources' 'app.asar'
+            if (Test-Path $sourceAsarPathProgramFiles) {
+                $sourceAsarPath = $sourceAsarPathProgramFiles
             } else {
-                Write-Error "app.asar not found in standard locations."
+                Write-Error "Source app.asar not found in standard locations."
                 exit 1
             }
         }
-        echo "ASAR_FINAL_PATH=$asarPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        echo "SOURCE_ASAR_PATH=$sourceAsarPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
       shell: pwsh
       
-    - run: |
-        $asarPath = "${{ steps.verify_asar.outputs.ASAR_FINAL_PATH }}"
-        $env:YAMUSIC_ASAR_PATH = $asarPath
+    - name: Run Patcher Script
+      id: patcher
+      run: |
+        $sourceAsar = "${{ steps.verify_source_asar.outputs.SOURCE_ASAR_PATH }}"
+        $patchedAsarOutput = Join-Path "${{ github.workspace }}" "app.asar"
+
+        $env:YAMUSIC_SOURCE_ASAR_PATH = $sourceAsar
+        $env:YAMUSIC_PATCHED_ASAR_OUTPUT_PATH = $patchedAsarOutput
+        
         npm install
         node patcher.js
+
+        echo "PATCHED_ASAR_FILE_PATH=$patchedAsarOutput" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
       shell: pwsh
       env:
         LOCALAPPDATA: ${{ env.LOCALAPPDATA }}
         PROGRAMFILES: ${{ env.ProgramFiles }}
-        
-    - run: |
-        Start-Sleep -Seconds 10
-      shell: pwsh
 
     - id: generate_release_info
       run: |
-        $asarPath = "${{ steps.verify_asar.outputs.ASAR_FINAL_PATH }}"
+        $patchedAsarPath = "${{ steps.patcher.outputs.PATCHED_ASAR_FILE_PATH }}" # Используем путь к пропатченному файлу
+        if (-not (Test-Path $patchedAsarPath)) {
+            Write-Error "Patched app.asar not found at $patchedAsarPath after patcher script!"
+            exit 1
+        }
         $timestamp = (Get-Date -Format "yyyy.MM.dd-HHmmss")
         $version = "patched-$timestamp"
-        $hashBytes = Get-FileHash -Algorithm SHA512 -Path $asarPath | Select-Object -ExpandProperty Hash
+        $hashBytes = Get-FileHash -Algorithm SHA512 -Path $patchedAsarPath | Select-Object -ExpandProperty Hash
         $asarHash = $hashBytes.ToLower()
         echo "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
         echo "asar_hash=$asarHash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-        echo "asar_file_name=$(Split-Path -Leaf $asarPath)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        echo "asar_file_name=app.asar" | Out-File -FilePath $env:GITHUB_OUTPUT -Append # Имя файла для релиза всегда app.asar
       shell: pwsh
 
     - name: Create latest.yml
       run: |
         $version = "${{ steps.generate_release_info.outputs.version }}"
-        $asarFileName = "${{ steps.generate_release_info.outputs.asar_file_name }}"
+        $asarFileName = "${{ steps.generate_release_info.outputs.asar_file_name }}" # Будет app.asar
         $asarHash = "${{ steps.generate_release_info.outputs.asar_hash }}"
-        $asarSize = $(Get-Item "${{ steps.verify_asar.outputs.ASAR_FINAL_PATH }}").Length
+        $asarSize = $(Get-Item "${{ steps.patcher.outputs.PATCHED_ASAR_FILE_PATH }}").Length # Размер пропатченного файла
         $releaseDate = $(Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
         
         $contentLines = @(
@@ -137,7 +149,7 @@ jobs:
           
           **WARNING:** This will replace your existing `app.asar`, `app-update.yml`, and `latest.yml`. Back up your files first!
         files: |
-          ${{ steps.verify_asar.outputs.ASAR_FINAL_PATH }}
+          ${{ steps.patcher.outputs.PATCHED_ASAR_FILE_PATH }} # Путь к пропатченному asar из шага патчера
           app-update.yml
           latest.yml
       env:
