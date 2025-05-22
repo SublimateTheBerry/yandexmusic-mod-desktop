@@ -144,7 +144,7 @@ jobs:
           
           **WARNING:** This will replace your existing `app.asar`, `app-update.yml`, and `latest.yml`. Back up your files first!
         files: |
-          ${{ steps.patcher.outputs.PATCHED_ASAR_FILE_PATH }}
+          app.asar
           app-update.yml
           latest.yml
       env:
