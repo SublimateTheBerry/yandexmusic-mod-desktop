@@ -26,12 +26,13 @@ const CONFIG = {
 
 async function patchApp() {
     let originalCwd;
-    // Пути получаем из переменных окружения
     const sourceAsarPath = process.env.YAMUSIC_SOURCE_ASAR_PATH;
     const patchedAsarOutputPath = process.env.YAMUSIC_PATCHED_ASAR_OUTPUT_PATH;
+    const patchVersion = process.env.YAMUSIC_PATCH_VERSION;
+    const githubReleasesUrl = process.env.GITHUB_RELEASES_URL;
 
-    if (!sourceAsarPath || !patchedAsarOutputPath) {
-        console.error('❌ Переменные окружения YAMUSIC_SOURCE_ASAR_PATH и YAMUSIC_PATCHED_ASAR_OUTPUT_PATH должны быть установлены!');
+    if (!sourceAsarPath || !patchedAsarOutputPath || !patchVersion || !githubReleasesUrl) {
+        console.error('❌ Отсутствуют необходимые переменные окружения!');
         process.exit(1);
     }
 
@@ -69,7 +70,9 @@ async function patchApp() {
 
         const packageJsonPath = 'package.json';
         if (fs.existsSync(packageJsonPath)) {
+            console.log('🛠️ Модификация package.json...');
             let pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+
             const deprecatedPackages = ['@yandex-chats/signer', 'yandex-music-unofficial'];
             deprecatedPackages.forEach(pkgName => {
                 if (pkg.dependencies?.[pkgName]) { delete pkg.dependencies[pkgName]; }
@@ -78,7 +81,17 @@ async function patchApp() {
             });
             pkg.dependencies = pkg.dependencies || {};
             pkg.dependencies['discord-rpc'] = '^3.2.0';
+
+            pkg.version = patchVersion;
+            if (pkg.buildInfo) {
+                pkg.buildInfo.VERSION = patchVersion;
+            }
+            if (pkg.common) {
+                pkg.common.UPDATE_URL = githubReleasesUrl;
+            }
+
             fs.writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2));
+            console.log('✅ package.json успешно модифицирован');
         } else {
             console.warn(`⚠️ Файл package.json не найден в ${CONFIG.OUTPUT_DIR}.`);
         }
@@ -119,7 +132,7 @@ function updatePresence() {
         }]
     };
     if (currentTrack.title) {
-        activity.startTimestamp = Math.floor(Date.now() / 1000) - (currentTrack.elapsed || 0);
+        activity.startTimestamp = Math.floor(Date.now() / 1000) - (currentTrack.title.length > 0 ? 0 : (currentTrack.elapsed || 0));
     }
     rpc.setActivity(activity).catch(console.error);
 }
@@ -184,7 +197,6 @@ rpc.login({ clientId: '${CONFIG.DISCORD_CLIENT_ID}' }).catch(console.error);
         }
         if (fs.existsSync(tempSourceAsarPath)) {
             fs.unlinkSync(tempSourceAsarPath);
-            console.log('🗑️ Временная копия исходного app.asar удалена.');
         }
 
         console.log('\n✨ Модификация и перепаковка Яндекс.Музыки завершена успешно!');
