@@ -30,8 +30,9 @@ async function patchApp() {
     const patchedAsarOutputPath = process.env.YAMUSIC_PATCHED_ASAR_OUTPUT_PATH;
     const patchVersion = process.env.YAMUSIC_PATCH_VERSION;
     const githubReleasesUrl = process.env.GITHUB_RELEASES_URL;
+    const githubRawUrl = process.env.GITHUB_RAW_URL;
 
-    if (!sourceAsarPath || !patchedAsarOutputPath || !patchVersion || !githubReleasesUrl) {
+    if (!sourceAsarPath || !patchedAsarOutputPath || !patchVersion || !githubReleasesUrl || !githubRawUrl) {
         console.error('❌ Отсутствуют необходимые переменные окружения!');
         process.exit(1);
     }
@@ -114,11 +115,9 @@ async function patchApp() {
         const preloadPath = path.join('main', 'lib', 'preload.js');
         if (fs.existsSync(preloadPath)) {
             const rpcCode = `
-// ======== Discord RPC Integration ========
 const { Client } = require('discord-rpc');
 const rpc = new Client({ transport: 'ipc' });
 let currentTrack = {};
-
 const SELECTORS = ${JSON.stringify(CONFIG.SELECTORS, null, 4)};
 
 function updatePresence() {
@@ -134,9 +133,9 @@ function updatePresence() {
         }]
     };
     if (currentTrack.title) {
-        activity.startTimestamp = Math.floor(Date.now() / 1000) - (currentTrack.elapsed || 0);
+        activity.startTimestamp = Math.floor(Date.now() / 1000) - (currentTrack.title.length > 0 ? 0 : (currentTrack.elapsed || 0));
     }
-    rpc.setActivity(activity).catch(err => console.error('[RPC] Ошибка установки активности:', err));
+    rpc.setActivity(activity).catch(console.error);
 }
 
 function trackListener() {
@@ -160,26 +159,20 @@ function trackListener() {
     const checkTrack = () => {
         const newData = getTrackInfo();
         if (newData.title !== currentTrack.title || newData.artist !== currentTrack.artist) {
-            console.log('[RPC] Трек изменился:', newData);
             currentTrack = newData;
             updatePresence();
         }
     };
-
     setInterval(checkTrack, 3000);
     setTimeout(checkTrack, 500);
 }
 
 rpc.on('ready', () => {
-    console.log('[RPC] Discord Rich Presence подключен для клиента ID: ${CONFIG.DISCORD_CLIENT_ID}');
     updatePresence();
     trackListener();
 });
 
-rpc.login({ clientId: '${CONFIG.DISCORD_CLIENT_ID}' }).catch(err => {
-    console.error('[RPC] Не удалось подключиться к Discord:', err);
-});
-// ======== Конец интеграции RPC ========
+rpc.login({ clientId: '${CONFIG.DISCORD_CLIENT_ID}' }).catch(console.error);
 `;
             let content = fs.readFileSync(preloadPath, 'utf8');
             const insertionPoint = content.lastIndexOf('}');
@@ -191,6 +184,18 @@ rpc.login({ clientId: '${CONFIG.DISCORD_CLIENT_ID}' }).catch(err => {
             }
         } else {
             console.warn(`⚠️ Файл preload.js не найден по пути: ${preloadPath}`);
+        }
+
+        const loadReleaseNotesPath = path.join('main', 'lib', 'loadReleaseNotes.js');
+        if (fs.existsSync(loadReleaseNotesPath)) {
+            console.log('🛠️ Модификация loadReleaseNotes.js...');
+            let content = fs.readFileSync(loadReleaseNotesPath, 'utf8');
+            content = content.replace(/(const url = `\$\{(config_1|config)\.config\.common\.UPDATE_URL\}release-notes\/\$\{\w+\}\.json`;)/g, `const url = \`${githubRawUrl}/release-notes/\${language}.json\`;`);
+            
+            fs.writeFileSync(loadReleaseNotesPath, content);
+            console.log('✅ loadReleaseNotes.js успешно модифицирован.');
+        } else {
+            console.warn(`⚠️ Файл loadReleaseNotes.js не найден по пути: ${loadReleaseNotesPath}`);
         }
 
         process.chdir(originalCwd);
