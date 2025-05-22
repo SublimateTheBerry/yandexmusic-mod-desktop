@@ -30,7 +30,7 @@ jobs:
 
     - run: |
         $installerPath = "${{ steps.download_installer.outputs.INSTALLER_PATH }}"
-        Start-Process -FilePath "$installerPath" -ArgumentList "/S" -Wait
+        Start-Process -FilePath "$installerPath" -Wait
       shell: pwsh
 
     - run: |
@@ -52,14 +52,32 @@ jobs:
         echo "SOURCE_ASAR_PATH=$sourceAsarPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
       shell: pwsh
       
+    - id: generate_release_info
+      run: |
+        $patchedAsarPath = Join-Path "${{ github.workspace }}" "app.asar"
+        $timestamp = (Get-Date -Format "yyyy.MM.dd-HHmmss")
+        $version = "patched-$timestamp"
+        echo "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        echo "asar_file_name=app.asar" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        echo "PATCHED_ASAR_TEMP_PATH=$patchedAsarPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        $repoOwner = "${{ github.repository_owner }}"
+        $repoName = "${{ github.event.repository.name }}"
+        $githubReleasesUrl = "https://github.com/$repoOwner/$repoName/releases"
+        echo "GITHUB_RELEASES_URL=$githubReleasesUrl" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+      shell: pwsh
+
     - name: Run Patcher Script
       id: patcher
       run: |
         $sourceAsar = "${{ steps.verify_source_asar.outputs.SOURCE_ASAR_PATH }}"
-        $patchedAsarOutput = Join-Path "${{ github.workspace }}" "app.asar"
+        $patchedAsarOutput = "${{ steps.generate_release_info.outputs.PATCHED_ASAR_TEMP_PATH }}"
+        $patchVersion = "${{ steps.generate_release_info.outputs.version }}"
+        $githubReleasesUrl = "${{ steps.generate_release_info.outputs.GITHUB_RELEASES_URL }}"
 
         $env:YAMUSIC_SOURCE_ASAR_PATH = $sourceAsar
         $env:YAMUSIC_PATCHED_ASAR_OUTPUT_PATH = $patchedAsarOutput
+        $env:YAMUSIC_PATCH_VERSION = $patchVersion
+        $env:GITHUB_RELEASES_URL = $githubReleasesUrl
         
         npm install
         node patcher.js
@@ -70,28 +88,22 @@ jobs:
         LOCALAPPDATA: ${{ env.LOCALAPPDATA }}
         PROGRAMFILES: ${{ env.ProgramFiles }}
 
-    - id: generate_release_info
+    - name: Finalize Release Info (Calculate Hash/Size)
+      id: finalize_release_info
       run: |
         $patchedAsarPath = "${{ steps.patcher.outputs.PATCHED_ASAR_FILE_PATH }}"
-        if (-not (Test-Path $patchedAsarPath)) {
-            Write-Error "Patched app.asar not found at $patchedAsarPath after patcher script!"
-            exit 1
-        }
-        $timestamp = (Get-Date -Format "yyyy.MM.dd-HHmmss")
-        $version = "patched-$timestamp"
-        $hashBytes = Get-FileHash -Algorithm SHA512 -Path $patchedAsarPath | Select-Object -ExpandProperty Hash
-        $asarHash = $hashBytes.ToLower()
-        echo "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        $asarHash = (Get-FileHash -Algorithm SHA512 -Path $patchedAsarPath | Select-Object -ExpandProperty Hash).ToLower()
+        $asarSize = (Get-Item $patchedAsarPath).Length
         echo "asar_hash=$asarHash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-        echo "asar_file_name=app.asar" | Out-File -FilePath $env:GITHUB_OUTPUT -Append # Имя файла для релиза всегда app.asar
+        echo "asar_size=$asarSize" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
       shell: pwsh
 
     - name: Create latest.yml
       run: |
         $version = "${{ steps.generate_release_info.outputs.version }}"
         $asarFileName = "${{ steps.generate_release_info.outputs.asar_file_name }}"
-        $asarHash = "${{ steps.generate_release_info.outputs.asar_hash }}"
-        $asarSize = $(Get-Item "${{ steps.patcher.outputs.PATCHED_ASAR_FILE_PATH }}").Length
+        $asarHash = "${{ steps.finalize_release_info.outputs.asar_hash }}"
+        $asarSize = "${{ steps.finalize_release_info.outputs.asar_size }}"
         $releaseDate = $(Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
         
         $contentLines = @(
@@ -112,11 +124,11 @@ jobs:
       run: |
         $repoOwner = "${{ github.repository_owner }}"
         $repoName = "${{ github.event.repository.name }}"
-        $releaseUrl = "https://github.com/$repoOwner/$repoName/releases"
         
         $contentLines = @(
-            "provider: generic",
-            "url: $releaseUrl",
+            "provider: github",
+            "owner: $repoOwner",
+            "repo: $repoName",
             "useMultipleRangeRequest: false",
             "updaterCacheDirName: yandexmusic-updater"
         )
