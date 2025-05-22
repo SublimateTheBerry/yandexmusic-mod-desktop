@@ -73,7 +73,7 @@ async function patchApp() {
             console.log('🛠️ Модификация package.json...');
             let pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
 
-            const deprecatedPackages = ['@yandex-chats/signer', 'yandex-music-unofficial'];
+            const deprecatedPackages = ['@yandex-chats/signer', 'yandex-music-unofficial', 'electron'];
             deprecatedPackages.forEach(pkgName => {
                 if (pkg.dependencies?.[pkgName]) { delete pkg.dependencies[pkgName]; }
                 if (pkg.devDependencies?.[pkgName]) { delete pkg.devDependencies[pkgName]; }
@@ -114,9 +114,11 @@ async function patchApp() {
         const preloadPath = path.join('main', 'lib', 'preload.js');
         if (fs.existsSync(preloadPath)) {
             const rpcCode = `
+// ======== Discord RPC Integration ========
 const { Client } = require('discord-rpc');
 const rpc = new Client({ transport: 'ipc' });
 let currentTrack = {};
+
 const SELECTORS = ${JSON.stringify(CONFIG.SELECTORS, null, 4)};
 
 function updatePresence() {
@@ -132,9 +134,9 @@ function updatePresence() {
         }]
     };
     if (currentTrack.title) {
-        activity.startTimestamp = Math.floor(Date.now() / 1000) - (currentTrack.title.length > 0 ? 0 : (currentTrack.elapsed || 0));
+        activity.startTimestamp = Math.floor(Date.now() / 1000) - (currentTrack.elapsed || 0);
     }
-    rpc.setActivity(activity).catch(console.error);
+    rpc.setActivity(activity).catch(err => console.error('[RPC] Ошибка установки активности:', err));
 }
 
 function trackListener() {
@@ -158,20 +160,26 @@ function trackListener() {
     const checkTrack = () => {
         const newData = getTrackInfo();
         if (newData.title !== currentTrack.title || newData.artist !== currentTrack.artist) {
+            console.log('[RPC] Трек изменился:', newData);
             currentTrack = newData;
             updatePresence();
         }
     };
+
     setInterval(checkTrack, 3000);
     setTimeout(checkTrack, 500);
 }
 
 rpc.on('ready', () => {
+    console.log('[RPC] Discord Rich Presence подключен для клиента ID: ${CONFIG.DISCORD_CLIENT_ID}');
     updatePresence();
     trackListener();
 });
 
-rpc.login({ clientId: '${CONFIG.DISCORD_CLIENT_ID}' }).catch(console.error);
+rpc.login({ clientId: '${CONFIG.DISCORD_CLIENT_ID}' }).catch(err => {
+    console.error('[RPC] Не удалось подключиться к Discord:', err);
+});
+// ======== Конец интеграции RPC ========
 `;
             let content = fs.readFileSync(preloadPath, 'utf8');
             const insertionPoint = content.lastIndexOf('}');
