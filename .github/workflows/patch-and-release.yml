@@ -17,7 +17,7 @@ jobs:
 
     - uses: actions/setup-node@v4
       with:
-        node-version: '18'
+        node-version: '20'
 
     - id: download_installer
       run: |
@@ -34,12 +34,7 @@ jobs:
       shell: pwsh
 
     - run: |
-        Start-Sleep -Seconds 30
-      shell: pwsh
-      
-    - run: |
-        Start-Sleep -Seconds 60
-        Stop-Process -Name "yandex*" -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 5
       shell: pwsh
 
     - id: verify_source_asar
@@ -77,7 +72,7 @@ jobs:
 
     - id: generate_release_info
       run: |
-        $patchedAsarPath = "${{ steps.patcher.outputs.PATCHED_ASAR_FILE_PATH }}" # Используем путь к пропатченному файлу
+        $patchedAsarPath = "${{ steps.patcher.outputs.PATCHED_ASAR_FILE_PATH }}"
         if (-not (Test-Path $patchedAsarPath)) {
             Write-Error "Patched app.asar not found at $patchedAsarPath after patcher script!"
             exit 1
@@ -94,9 +89,9 @@ jobs:
     - name: Create latest.yml
       run: |
         $version = "${{ steps.generate_release_info.outputs.version }}"
-        $asarFileName = "${{ steps.generate_release_info.outputs.asar_file_name }}" # Будет app.asar
+        $asarFileName = "${{ steps.generate_release_info.outputs.asar_file_name }}"
         $asarHash = "${{ steps.generate_release_info.outputs.asar_hash }}"
-        $asarSize = $(Get-Item "${{ steps.patcher.outputs.PATCHED_ASAR_FILE_PATH }}").Length # Размер пропатченного файла
+        $asarSize = $(Get-Item "${{ steps.patcher.outputs.PATCHED_ASAR_FILE_PATH }}").Length
         $releaseDate = $(Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
         
         $contentLines = @(
@@ -149,7 +144,7 @@ jobs:
           
           **WARNING:** This will replace your existing `app.asar`, `app-update.yml`, and `latest.yml`. Back up your files first!
         files: |
-          ${{ steps.patcher.outputs.PATCHED_ASAR_FILE_PATH }} # Путь к пропатченному asar из шага патчера
+          ${{ steps.patcher.outputs.PATCHED_ASAR_FILE_PATH }}
           app-update.yml
           latest.yml
       env:
