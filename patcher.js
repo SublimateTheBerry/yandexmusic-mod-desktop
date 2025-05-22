@@ -30,9 +30,9 @@ async function patchApp() {
     const patchedAsarOutputPath = process.env.YAMUSIC_PATCHED_ASAR_OUTPUT_PATH;
     const patchVersion = process.env.YAMUSIC_PATCH_VERSION;
     const githubReleasesUrl = process.env.GITHUB_RELEASES_URL;
-    const githubRawUrl = process.env.GITHUB_RAW_URL;
+    const githubReleasesDownloadUrlBase = process.env.GITHUB_RELEASES_DOWNLOAD_URL_BASE;
 
-    if (!sourceAsarPath || !patchedAsarOutputPath || !patchVersion || !githubReleasesUrl || !githubRawUrl) {
+    if (!sourceAsarPath || !patchedAsarOutputPath || !patchVersion || !githubReleasesUrl || !githubReleasesDownloadUrlBase) {
         console.error('❌ Отсутствуют необходимые переменные окружения!');
         process.exit(1);
     }
@@ -190,7 +190,7 @@ rpc.login({ clientId: '${CONFIG.DISCORD_CLIENT_ID}' }).catch(console.error);
         if (fs.existsSync(loadReleaseNotesPath)) {
             console.log('🛠️ Модификация loadReleaseNotes.js...');
             let content = fs.readFileSync(loadReleaseNotesPath, 'utf8');
-            content = content.replace(/(const url = `\$\{(config_1|config)\.config\.common\.UPDATE_URL\}release-notes\/\$\{\w+\}\.json`;)/g, `const url = \`${githubRawUrl}/release-notes/\${language}.json\`;`);
+            content = content.replace(/(const url = `\$\{(config_1|config)\.config\.common\.UPDATE_URL\}release-notes\/\$\{\w+\}\.json`;)/g, `const url = \`${githubReleasesDownloadUrlBase}/${patchVersion}/\${language}.json\`;`);
             
             fs.writeFileSync(loadReleaseNotesPath, content);
             console.log('✅ loadReleaseNotes.js успешно модифицирован.');
