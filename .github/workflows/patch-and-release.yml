@@ -1,0 +1,144 @@
+name: Patch and Release Yandex Music
+
+on:
+  workflow_dispatch:
+    inputs:
+      yandex_music_version:
+        description: 'Yandex Music x64 version (e.g., 5.51.1)'
+        required: true
+        default: '5.51.1'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - id: download_installer
+      run: |
+        $version = "${{ github.event.inputs.yandex_music_version }}"
+        $downloadUrl = "https://music-desktop-application.s3.yandex.net/stable/Yandex_Music_x64_$version.exe"
+        $installerPath = Join-Path $env:TEMP "YandexMusicInstaller.exe"
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $installerPath -TimeoutSec 300
+        echo "INSTALLER_PATH=$installerPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+      shell: pwsh
+
+    - run: |
+        $installerPath = "${{ steps.download_installer.outputs.INSTALLER_PATH }}"
+        Start-Process -FilePath "$installerPath" -ArgumentList "/S" -Wait
+      shell: pwsh
+
+    - run: |
+        Start-Sleep -Seconds 30
+      shell: pwsh
+      
+    - run: |
+        Start-Sleep -Seconds 60
+        Stop-Process -Name "yandex*" -ErrorAction SilentlyContinue
+      shell: pwsh
+
+    - id: verify_asar
+      run: |
+        $asarPath = Join-Path $env:LOCALAPPDATA 'Programs' 'YandexMusic' 'resources' 'app.asar'
+        if (-not (Test-Path $asarPath)) {
+            $asarPathProgramFiles = Join-Path $env:ProgramFiles 'Yandex Music' 'resources' 'app.asar'
+            if (Test-Path $asarPathProgramFiles) {
+                $asarPath = $asarPathProgramFiles
+            } else {
+                Write-Error "app.asar not found in standard locations."
+                exit 1
+            }
+        }
+        echo "ASAR_FINAL_PATH=$asarPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+      shell: pwsh
+      
+    - run: |
+        $asarPath = "${{ steps.verify_asar.outputs.ASAR_FINAL_PATH }}"
+        $env:YAMUSIC_ASAR_PATH = $asarPath
+        npm install
+        node patcher.js
+      shell: pwsh
+      env:
+        LOCALAPPDATA: ${{ env.LOCALAPPDATA }}
+        PROGRAMFILES: ${{ env.ProgramFiles }}
+
+    - id: generate_release_info
+      run: |
+        $asarPath = "${{ steps.verify_asar.outputs.ASAR_FINAL_PATH }}"
+        $timestamp = (Get-Date -Format "yyyy.MM.dd-HHmmss")
+        $version = "patched-$timestamp"
+        $hashBytes = Get-FileHash -Algorithm SHA512 -Path $asarPath | Select-Object -ExpandProperty Hash
+        $asarHash = $hashBytes.ToLower()
+        echo "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        echo "asar_hash=$asarHash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        echo "asar_file_name=$(Split-Path -Leaf $asarPath)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+      shell: pwsh
+
+    - name: Create latest.yml
+      run: |
+        $version = "${{ steps.generate_release_info.outputs.version }}"
+        $asarFileName = "${{ steps.generate_release_info.outputs.asar_file_name }}"
+        $asarHash = "${{ steps.generate_release_info.outputs.asar_hash }}"
+        $asarSize = $(Get-Item "${{ steps.verify_asar.outputs.ASAR_FINAL_PATH }}").Length
+        $releaseDate = $(Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+        
+        $contentLines = @(
+            "version: $version",
+            "files:",
+            "  - url: $asarFileName",
+            "    size: $asarSize",
+            "    sha512: $asarHash",
+            "path: $asarFileName",
+            "sha512: $asarHash",
+            "releaseDate: $releaseDate"
+        )
+        Set-Content -Path "latest.yml" -Value ($contentLines -join "`n") -Encoding UTF8
+      shell: pwsh
+
+    - name: Create app-update.yml
+      id: create_app_update_yml 
+      run: |
+        $repoOwner = "${{ github.repository_owner }}"
+        $repoName = "${{ github.event.repository.name }}"
+        $releaseUrl = "https://github.com/$repoOwner/$repoName/releases"
+        
+        $contentLines = @(
+            "provider: generic",
+            "url: $releaseUrl",
+            "useMultipleRangeRequest: false",
+            "updaterCacheDirName: yandexmusic-updater"
+        )
+        Set-Content -Path "app-update.yml" -Value ($contentLines -join "`n") -Encoding UTF8
+      shell: pwsh
+
+    - uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.generate_release_info.outputs.version }}
+        name: Patched Yandex Music - ${{ steps.generate_release_info.outputs.version }}
+        body: |
+          A new patched version of Yandex Music.
+          
+          This release includes:
+          - Discord RPC integration
+          
+          **How to use (manual replacement):**
+          1. Download `app.asar`, `app-update.yml`, and `latest.yml` from this release.
+          2. Locate your Yandex Music installation folder (usually `C:\Users\<YOUR_USERNAME>\AppData\Local\Programs\YandexMusic` or `C:\Program Files\Yandex Music`).
+          3. Navigate to the `resources` subfolder.
+          4. Replace the existing `app.asar` and `app-update.yml` files with the downloaded ones. Also place `latest.yml` there.
+          
+          **For automatic updates (after initial manual setup):**
+          If you have replaced `app-update.yml` and placed `latest.yml` in your Yandex Music `resources` folder, the application should now check for updates from this GitHub repository.
+          
+          **WARNING:** This will replace your existing `app.asar`, `app-update.yml`, and `latest.yml`. Back up your files first!
+        files: |
+          ${{ steps.verify_asar.outputs.ASAR_FINAL_PATH }}
+          app-update.yml
+          latest.yml
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
