@@ -1,0 +1,32 @@
+{
+  "name": "yandexmusic-desktop-mod",
+  "version": "1.0.0",
+  "description": "A patcher script for the Yandex Music desktop application to add features like Discord Rich Presence",
+  "main": "patcher.js",
+  "scripts": {
+    "start": "node patcher.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SublimateTheBerry/yandexmusic-mod-desktop.git"
+  },
+  "keywords": [
+    "yandex-music",
+    "yandexmusic",
+    "mod",
+    "patcher",
+    "electron",
+    "discord",
+    "rpc"
+  ],
+  "author": "SublimateTheBerry",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/SublimateTheBerry/yandexmusic-mod-desktop/issues"
+  },
+  "homepage": "https://github.com/SublimateTheBerry/yandexmusic-mod-desktop#readme",
+  "dependencies": {
+    "@electron/asar": "^3.4.1"
+  }
+}
