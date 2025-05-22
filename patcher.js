@@ -190,7 +190,7 @@ rpc.login({ clientId: '${CONFIG.DISCORD_CLIENT_ID}' }).catch(console.error);
         if (fs.existsSync(loadReleaseNotesPath)) {
             console.log('🛠️ Модификация loadReleaseNotes.js...');
             let content = fs.readFileSync(loadReleaseNotesPath, 'utf8');
-            content = content.replace(/(const url = `\$\{(config_1|config)\.config\.common\.UPDATE_URL\}release-notes\/\$\{\w+\}\.json`;)/g, `const url = \`${githubReleasesDownloadUrlBase}/${patchVersion}/\${language}.json\`;`);
+            content = content.replace(/(const url = `\$\{(config_1|config)\.config\.common\.UPDATE_URL\}release-notes\/\$\{\w+\}\.json`;)/g, `const url = \`${githubReleasesDownloadUrlBase}/${patchVersion}/ru.json\`;`);
             
             fs.writeFileSync(loadReleaseNotesPath, content);
             console.log('✅ loadReleaseNotes.js успешно модифицирован.');
