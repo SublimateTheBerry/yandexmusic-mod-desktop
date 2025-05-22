@@ -4,7 +4,6 @@ const fs = require('fs');
 const { execSync } = require('child_process');
 
 const CONFIG = {
-    ASAR_PATH: process.env.YAMUSIC_ASAR_PATH || path.join(process.env.LOCALAPPDATA, 'Programs', 'YandexMusic', 'resources', 'app.asar'),
     OUTPUT_DIR: path.join(__dirname, 'unpasar'),
     DISCORD_CLIENT_ID: '1373226184820916265',
     SELECTORS: {
@@ -27,23 +26,36 @@ const CONFIG = {
 
 async function patchApp() {
     let originalCwd;
-    const targetAsarPath = CONFIG.ASAR_PATH;
+    // Пути получаем из переменных окружения
+    const sourceAsarPath = process.env.YAMUSIC_SOURCE_ASAR_PATH;
+    const patchedAsarOutputPath = process.env.YAMUSIC_PATCHED_ASAR_OUTPUT_PATH;
+
+    if (!sourceAsarPath || !patchedAsarOutputPath) {
+        console.error('❌ Переменные окружения YAMUSIC_SOURCE_ASAR_PATH и YAMUSIC_PATCHED_ASAR_OUTPUT_PATH должны быть установлены!');
+        process.exit(1);
+    }
+
+    const tempSourceAsarPath = path.join(__dirname, 'source_app.asar');
 
     try {
         console.log('🔹Начало модификации Яндекс.Музыки');
 
-        if (!fs.existsSync(targetAsarPath)) {
-            throw new Error(`Файл ${targetAsarPath} не найден.`);
+        if (!fs.existsSync(sourceAsarPath)) {
+            throw new Error(`Исходный файл ${sourceAsarPath} не найден.`);
         }
+
+        console.log(`Копирование ${sourceAsarPath} в ${tempSourceAsarPath}...`);
+        fs.copyFileSync(sourceAsarPath, tempSourceAsarPath);
+        console.log('✅ Исходный app.asar скопирован.');
 
         if (fs.existsSync(CONFIG.OUTPUT_DIR)) {
             fs.rmSync(CONFIG.OUTPUT_DIR, { recursive: true, force: true });
         }
         fs.mkdirSync(CONFIG.OUTPUT_DIR, { recursive: true });
 
-        console.log(`📦 Распаковка ${targetAsarPath} в ${CONFIG.OUTPUT_DIR}...`);
-        asar.extractAll(targetAsarPath, CONFIG.OUTPUT_DIR);
-        console.log('✅ app.asar успешно распакован');
+        console.log(`📦 Распаковка ${tempSourceAsarPath} в ${CONFIG.OUTPUT_DIR}...`);
+        asar.extractAll(tempSourceAsarPath, CONFIG.OUTPUT_DIR);
+        console.log('✅ Временный app.asar успешно распакован');
 
         originalCwd = process.cwd();
         process.chdir(CONFIG.OUTPUT_DIR);
@@ -163,20 +175,16 @@ rpc.login({ clientId: '${CONFIG.DISCORD_CLIENT_ID}' }).catch(console.error);
         process.chdir(originalCwd);
         originalCwd = null;
         
-        if (fs.existsSync(targetAsarPath)) {
-            try {
-                fs.unlinkSync(targetAsarPath);
-            } catch (unlinkError) {
-                console.warn(`⚠️ Ошибка при удалении старого ${targetAsarPath}: ${unlinkError.message}.`);
-            }
-        }
-        
-        console.log(`📦 Упаковка модифицированной директории ${CONFIG.OUTPUT_DIR} в ${targetAsarPath}...`);
-        await asar.createPackage(CONFIG.OUTPUT_DIR, targetAsarPath);
-        console.log('✅ Патченный app.asar успешно создан (перезаписан).');
+        console.log(`📦 Упаковка модифицированной директории ${CONFIG.OUTPUT_DIR} в ${patchedAsarOutputPath}...`);
+        await asar.createPackage(CONFIG.OUTPUT_DIR, patchedAsarOutputPath);
+        console.log(`✅ Патченный app.asar успешно создан в ${patchedAsarOutputPath}.`);
 
         if (fs.existsSync(CONFIG.OUTPUT_DIR)) {
             fs.rmSync(CONFIG.OUTPUT_DIR, { recursive: true, force: true });
+        }
+        if (fs.existsSync(tempSourceAsarPath)) {
+            fs.unlinkSync(tempSourceAsarPath);
+            console.log('🗑️ Временная копия исходного app.asar удалена.');
         }
 
         console.log('\n✨ Модификация и перепаковка Яндекс.Музыки завершена успешно!');
