@@ -7,6 +7,15 @@ on:
         description: 'Yandex Music x64 version (e.g., 5.51.1)'
         required: true
         default: '5.51.1'
+      release_notes_ru_text:
+        description: 'Release notes for Russian (plain text/simple markdown)'
+        required: false
+        default: |
+          **Обновление патча Яндекс Музыки!**
+          
+          *   Исправлена работа Discord RPC.
+          *   Обновлены внутренние ссылки для обновлений.
+          *   Теперь вы сможете получать информацию о патчах прямо в приложении.
 
 jobs:
   build:
@@ -55,17 +64,18 @@ jobs:
     - id: generate_release_info
       run: |
         $patchedAsarPath = Join-Path "${{ github.workspace }}" "app.asar"
-        $baseVersion = "${{ github.event.inputs.yandex_music_version }}" # Базовая версия Я.Музыки
-        $timestamp = (Get-Date -Format "yyyyMMdd.HHmmss") # Формат для SemVer (без дефисов, только точки)
-        $version = "$baseVersion-patched.$timestamp" # Новый формат SemVer
-        
+        $baseVersion = "${{ github.event.inputs.yandex_music_version }}"
+        $timestamp = (Get-Date -Format "yyyyMMdd.HHmmss")
+        $version = "$baseVersion-patched.$timestamp"
         echo "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
         echo "asar_file_name=app.asar" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
         echo "PATCHED_ASAR_TEMP_PATH=$patchedAsarPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
         $repoOwner = "${{ github.repository_owner }}"
         $repoName = "${{ github.event.repository.name }}"
         $githubReleasesUrl = "https://github.com/$repoOwner/$repoName/releases"
+        $githubRawUrl = "https://raw.githubusercontent.com/$repoOwner/$repoName/main" 
         echo "GITHUB_RELEASES_URL=$githubReleasesUrl" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        echo "GITHUB_RAW_URL=$githubRawUrl" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
       shell: pwsh
 
     - name: Run Patcher Script
@@ -75,11 +85,13 @@ jobs:
         $patchedAsarOutput = "${{ steps.generate_release_info.outputs.PATCHED_ASAR_TEMP_PATH }}"
         $patchVersion = "${{ steps.generate_release_info.outputs.version }}"
         $githubReleasesUrl = "${{ steps.generate_release_info.outputs.GITHUB_RELEASES_URL }}"
+        $githubRawUrl = "${{ steps.generate_release_info.outputs.GITHUB_RAW_URL }}"
 
         $env:YAMUSIC_SOURCE_ASAR_PATH = $sourceAsar
         $env:YAMUSIC_PATCHED_ASAR_OUTPUT_PATH = $patchedAsarOutput
         $env:YAMUSIC_PATCH_VERSION = $patchVersion
         $env:GITHUB_RELEASES_URL = $githubReleasesUrl
+        $env:GITHUB_RAW_URL = $githubRawUrl
         
         npm install
         node patcher.js
@@ -94,6 +106,10 @@ jobs:
       id: finalize_release_info
       run: |
         $patchedAsarPath = "${{ steps.patcher.outputs.PATCHED_ASAR_FILE_PATH }}"
+        if (-not (Test-Path $patchedAsarPath)) {
+            Write-Error "Patched app.asar not found at $patchedAsarPath after patcher script!"
+            exit 1
+        }
         $asarHash = (Get-FileHash -Algorithm SHA512 -Path $patchedAsarPath | Select-Object -ExpandProperty Hash).ToLower()
         $asarSize = (Get-Item $patchedAsarPath).Length
         echo "asar_hash=$asarHash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
@@ -137,6 +153,50 @@ jobs:
         Set-Content -Path "app-update.yml" -Value ($contentLines -join "`n") -Encoding UTF8
       shell: pwsh
 
+    - name: Create Release Notes JSON (ru)
+      run: |
+        $releaseNotesMarkdown = "${{ github.event.inputs.release_notes_ru_text }}"
+        $version = "${{ steps.generate_release_info.outputs.version }}"
+        $currentDate = (Get-Date -Format "dd MMMM yyyy г.")
+
+        $paragraphs = $releaseNotesMarkdown -split "`n`n" | Where-Object { $_ -ne "" }
+
+        $astNodes = @()
+        $astNodes += @{ "type" = 8; "value" = "date"; "children" = @(@{ "type" = 0; "value" = $currentDate }) }
+        $astNodes += @{ "type" = 0; "value" = "`n" }
+
+        foreach ($p in $paragraphs) {
+            $p = $p.Trim()
+            if ($p.StartsWith('* ') -or $p.StartsWith('- ')) {
+                $listItems = $p -split "`n" | Where-Object { $_ -ne "" }
+                $listNodes = @()
+                foreach ($item in $listItems) {
+                    $item = $item.TrimStart('*', '-', ' ')
+                    $listNodes += @{ "type" = 0; "value" = "`n" }
+                    $listNodes += @{ "type" = 8; "value" = "li"; "children" = @(@{ "type" = 0; "value" = $item }) }
+                }
+                $listNodes += @{ "type" = 0; "value" = "`n" }
+                $astNodes += @{ "type" = 8; "value" = "ul"; "children" = $listNodes }
+            } else {
+                $astNodes += @{ "type" = 8; "value" = "p"; "children" = @(@{ "type" = 0; "value" = $p }) }
+            }
+            $astNodes += @{ "type" = 0; "value" = "`n" }
+        }
+        
+        $releaseNotesJson = @{
+            ("desktop-release-notes." + $version) = $astNodes
+        } | ConvertTo-Json -Depth 100 -Compress
+
+        $releaseNotesDir = "release-notes"
+        if (-not (Test-Path $releaseNotesDir)) {
+            New-Item -ItemType Directory -Path $releaseNotesDir
+        }
+        
+        Set-Content -Path (Join-Path $releaseNotesDir "ru.json") -Value $releaseNotesJson -Encoding UTF8
+        Write-Host "Generated release-notes/ru.json:"
+        Get-Content (Join-Path $releaseNotesDir "ru.json")
+      shell: pwsh
+
     - uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ steps.generate_release_info.outputs.version }}
@@ -146,20 +206,23 @@ jobs:
           
           This release includes:
           - Discord RPC integration
+          - Custom update source for release notes
           
           **How to use (manual replacement):**
-          1. Download `app.asar`, `app-update.yml`, and `latest.yml` from this release.
+          1. Download `app.asar`, `app-update.yml`, `latest.yml`, and `release-notes/ru.json` (and other languages) from this release.
           2. Locate your Yandex Music installation folder (usually `C:\Users\<YOUR_USERNAME>\AppData\Local\Programs\YandexMusic` or `C:\Program Files\Yandex Music`).
           3. Navigate to the `resources` subfolder.
-          4. Replace the existing `app.asar` and `app-update.yml` files with the downloaded ones. Also place `latest.yml` there.
+          4. Replace `app.asar` and `app-update.yml`. Place `latest.yml` there.
+          5. Create a `release-notes` folder inside `resources` if it doesn't exist, and place `ru.json` (and others) inside it.
           
           **For automatic updates (after initial manual setup):**
-          If you have replaced `app-update.yml` and placed `latest.yml` in your Yandex Music `resources` folder, the application should now check for updates from this GitHub repository.
+          If you have replaced `app-update.asar`, `app-update.yml` and placed `latest.yml` and `release-notes/ru.json` (and others) in your Yandex Music `resources` folder, the application should now check for updates from this GitHub repository.
           
-          **WARNING:** This will replace your existing `app.asar`, `app-update.yml`, and `latest.yml`. Back up your files first!
+          **WARNING:** This will replace your existing `app.asar`, `app-update.yml`, `latest.yml`, and `release-notes` files. Back up your files first!
         files: |
           app.asar
           app-update.yml
           latest.yml
+          release-notes/ru.json
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
