@@ -43,7 +43,7 @@ jobs:
       shell: pwsh
 
     - run: |
-        Start-Sleep -Seconds 5
+        Start-Sleep -Seconds 2
       shell: pwsh
 
     - id: verify_source_asar
@@ -70,12 +70,13 @@ jobs:
         echo "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
         echo "asar_file_name=app.asar" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
         echo "PATCHED_ASAR_TEMP_PATH=$patchedAsarPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
         $repoOwner = "${{ github.repository_owner }}"
         $repoName = "${{ github.event.repository.name }}"
         $githubReleasesUrl = "https://github.com/$repoOwner/$repoName/releases"
-        $githubRawUrl = "https://raw.githubusercontent.com/$repoOwner/$repoName/main" 
+        $githubReleasesDownloadUrlBase = "https://github.com/$repoOwner/$repoName/releases/download"
         echo "GITHUB_RELEASES_URL=$githubReleasesUrl" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-        echo "GITHUB_RAW_URL=$githubRawUrl" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        echo "GITHUB_RELEASES_DOWNLOAD_URL_BASE=$githubReleasesDownloadUrlBase" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
       shell: pwsh
 
     - name: Run Patcher Script
@@ -85,13 +86,13 @@ jobs:
         $patchedAsarOutput = "${{ steps.generate_release_info.outputs.PATCHED_ASAR_TEMP_PATH }}"
         $patchVersion = "${{ steps.generate_release_info.outputs.version }}"
         $githubReleasesUrl = "${{ steps.generate_release_info.outputs.GITHUB_RELEASES_URL }}"
-        $githubRawUrl = "${{ steps.generate_release_info.outputs.GITHUB_RAW_URL }}"
+        $githubReleasesDownloadUrlBase = "${{ steps.generate_release_info.outputs.GITHUB_RELEASES_DOWNLOAD_URL_BASE }}"
 
         $env:YAMUSIC_SOURCE_ASAR_PATH = $sourceAsar
         $env:YAMUSIC_PATCHED_ASAR_OUTPUT_PATH = $patchedAsarOutput
         $env:YAMUSIC_PATCH_VERSION = $patchVersion
         $env:GITHUB_RELEASES_URL = $githubReleasesUrl
-        $env:GITHUB_RAW_URL = $githubRawUrl
+        $env:GITHUB_RELEASES_DOWNLOAD_URL_BASE = $githubReleasesDownloadUrlBase
         
         npm install
         node patcher.js
@@ -193,8 +194,6 @@ jobs:
         }
         
         Set-Content -Path (Join-Path $releaseNotesDir "ru.json") -Value $releaseNotesJson -Encoding UTF8
-        Write-Host "Generated release-notes/ru.json:"
-        Get-Content (Join-Path $releaseNotesDir "ru.json")
       shell: pwsh
 
     - uses: softprops/action-gh-release@v1
