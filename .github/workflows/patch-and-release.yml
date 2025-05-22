@@ -67,22 +67,6 @@ jobs:
         Start-Sleep -Seconds 10
       shell: pwsh
 
-    - name: Check for app.asar and list resources directory after patcher
-      run: |
-        $asarFinalPath = "${{ steps.verify_asar.outputs.ASAR_FINAL_PATH }}"
-        $resourcesDir = Split-Path $asarFinalPath
-        Write-Host "Expected app.asar path: $asarFinalPath"
-        Write-Host "Contents of resources directory ($resourcesDir):"
-        Get-ChildItem -Path $resourcesDir -Recurse -Force | Select-Object FullName, Length, LastWriteTime
-        Write-Host "Checking existence of $asarFinalPath:"
-        $asarExists = Test-Path $asarFinalPath
-        Write-Host "app.asar exists: $asarExists"
-        if (-not $asarExists) {
-          Write-Error "app.asar was NOT found at $asarFinalPath after patcher script."
-          # exit 1 
-        }
-      shell: pwsh
-
     - id: generate_release_info
       run: |
         $asarPath = "${{ steps.verify_asar.outputs.ASAR_FINAL_PATH }}"
