@@ -7,11 +7,6 @@ const CONFIG = {
     ASAR_PATH: process.env.YAMUSIC_ASAR_PATH || path.join(process.env.LOCALAPPDATA, 'Programs', 'YandexMusic', 'resources', 'app.asar'),
     OUTPUT_DIR: path.join(__dirname, 'unpasar'),
     DISCORD_CLIENT_ID: '1373226184820916265',
-    MEDIA_FILES_TO_REPLACE: [
-        { filename: 'splash_screen_dark.mp4', required: false },
-        { filename: 'splash_screen_dark.webm', required: false }
-    ],
-    MEDIA_TARGET_PATH_IN_ASAR: ['app', 'media'],
     SELECTORS: {
         CURRENT: {
             TITLE: '.Meta_title__GGBnH',
@@ -32,19 +27,13 @@ const CONFIG = {
 
 async function patchApp() {
     let originalCwd;
-    const currentAsarPath = CONFIG.ASAR_PATH;
-    const trueOriginalBackupPath = currentAsarPath + '.original.backup';
-    const prevVersionBackupPath = currentAsarPath + '.prev.backup';
+    const targetAsarPath = CONFIG.ASAR_PATH;
 
     try {
         console.log('🔹Начало модификации Яндекс.Музыки');
 
-        if (fs.existsSync(currentAsarPath)) {
-            if (!fs.existsSync(trueOriginalBackupPath)) {
-                fs.copyFileSync(currentAsarPath, trueOriginalBackupPath);
-            }
-        } else {
-            throw new Error(`Файл ${currentAsarPath} не найден.`);
+        if (!fs.existsSync(targetAsarPath)) {
+            throw new Error(`Файл ${targetAsarPath} не найден.`);
         }
 
         if (fs.existsSync(CONFIG.OUTPUT_DIR)) {
@@ -52,7 +41,9 @@ async function patchApp() {
         }
         fs.mkdirSync(CONFIG.OUTPUT_DIR, { recursive: true });
 
-        asar.extractAll(currentAsarPath, CONFIG.OUTPUT_DIR);
+        console.log(`📦 Распаковка ${targetAsarPath} в ${CONFIG.OUTPUT_DIR}...`);
+        asar.extractAll(targetAsarPath, CONFIG.OUTPUT_DIR);
+        console.log('✅ app.asar успешно распакован');
 
         originalCwd = process.cwd();
         process.chdir(CONFIG.OUTPUT_DIR);
@@ -77,14 +68,22 @@ async function patchApp() {
             pkg.dependencies['discord-rpc'] = '^3.2.0';
             fs.writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2));
         } else {
-            console.warn(`⚠️Файл package.json не найден в ${CONFIG.OUTPUT_DIR}.`);
+            console.warn(`⚠️ Файл package.json не найден в ${CONFIG.OUTPUT_DIR}.`);
         }
 
         fs.writeFileSync('.npmrc', 'optional=true\nfund=false\naudit=false\nlegacy-peer-deps=true\n');
+        console.log('📦 Устанавливаем зависимости (включая discord-rpc)...');
         try {
             execSync('npm install --no-audit --no-fund --loglevel=error', { stdio: 'inherit' });
+            console.log('✅ Зависимости успешно установлены.');
         } catch (e) {
-            execSync('npm install discord-rpc@3.2.0 --no-save --no-audit --no-fund --loglevel=error', { stdio: 'inherit' });
+            console.warn('⚠ Ошибка установки, пробуем установить только discord-rpc...');
+            try {
+                execSync('npm install discord-rpc@3.2.0 --no-save --no-audit --no-fund --loglevel=error', { stdio: 'inherit' });
+                console.log('✅ discord-rpc установлен альтернативным методом.');
+            } catch (finalError) {
+                throw finalError;
+            }
         }
 
         const preloadPath = path.join('main', 'lib', 'preload.js');
@@ -110,7 +109,7 @@ function updatePresence() {
     if (currentTrack.title) {
         activity.startTimestamp = Math.floor(Date.now() / 1000) - (currentTrack.elapsed || 0);
     }
-    rpc.setActivity(activity).catch(err => console.error('[RPC] Ошибка установки активности:', err));
+    rpc.setActivity(activity).catch(console.error);
 }
 
 function trackListener() {
@@ -147,9 +146,7 @@ rpc.on('ready', () => {
     trackListener();
 });
 
-rpc.login({ clientId: '${CONFIG.DISCORD_CLIENT_ID}' }).catch(err => {
-    console.error('[RPC] Не удалось подключиться к Discord:', err);
-});
+rpc.login({ clientId: '${CONFIG.DISCORD_CLIENT_ID}' }).catch(console.error);
 `;
             let content = fs.readFileSync(preloadPath, 'utf8');
             const insertionPoint = content.lastIndexOf('}');
@@ -157,67 +154,42 @@ rpc.login({ clientId: '${CONFIG.DISCORD_CLIENT_ID}' }).catch(err => {
                 content = content.substring(0, insertionPoint) + rpcCode + '\n' + content.substring(insertionPoint);
                  fs.writeFileSync(preloadPath, content);
             } else {
-                console.warn('⚠️Не удалось найти подходящее место для вставки RPC кода в preload.js');
+                console.warn('⚠️ Не удалось найти подходящее место для вставки RPC кода в preload.js');
             }
         } else {
-            console.warn(`⚠️Файл preload.js не найден по пути: ${preloadPath}`);
-        }
-
-        const mediaSourceDir = __dirname;
-        const mediaTargetDirRelativeInAsar = path.join(...CONFIG.MEDIA_TARGET_PATH_IN_ASAR);
-
-        if (!fs.existsSync(mediaTargetDirRelativeInAsar)) {
-            try {
-                fs.mkdirSync(mediaTargetDirRelativeInAsar, { recursive: true });
-            } catch (mkdirError) {
-                 console.error(`❌Ошибка при создании директории ${mediaTargetDirRelativeInAsar}: ${mkdirError.message}.`);
-            }
-        }
-
-        if (fs.existsSync(mediaTargetDirRelativeInAsar)) {
-            CONFIG.MEDIA_FILES_TO_REPLACE.forEach(mediaFile => {
-                const sourceFilePath = path.join(mediaSourceDir, mediaFile.filename);
-                const targetFilePathRelativeInAsar = path.join(mediaTargetDirRelativeInAsar, mediaFile.filename);
-                if (fs.existsSync(targetFilePathRelativeInAsar)) {
-                    try {
-                        fs.unlinkSync(targetFilePathRelativeInAsar);
-                    } catch (unlinkError) {
-                        console.warn(`⚠️Ошибка при удалении существующего файла ${targetFilePathRelativeInAsar}: ${unlinkError.message}.`);
-                    }
-                }
-                if (fs.existsSync(sourceFilePath)) {
-                    try {
-                        fs.copyFileSync(sourceFilePath, targetFilePathRelativeInAsar);
-                    } catch (copyError) {
-                        console.warn(`⚠️Ошибка при копировании ${mediaFile.filename}: ${copyError.message}`);
-                    }
-                } else {
-                    if (mediaFile.required) {
-                        console.error(`Исходный файл ${sourceFilePath} не найден. (Файл обязателен!)`);
-                    }
-                }
-            });
+            console.warn(`⚠️ Файл preload.js не найден по пути: ${preloadPath}`);
         }
 
         process.chdir(originalCwd);
         originalCwd = null;
-
-        if (fs.existsSync(currentAsarPath)) {
+        
+        if (fs.existsSync(targetAsarPath)) {
             try {
-                fs.renameSync(currentAsarPath, prevVersionBackupPath);
-            } catch (renameError) {
-                console.error(`❌Ошибка при переименовании ${currentAsarPath}: ${renameError.message}`);
-                throw new Error(`Не удалось создать бэкап предыдущей версии.`);
+                fs.unlinkSync(targetAsarPath);
+            } catch (unlinkError) {
+                console.warn(`⚠️ Ошибка при удалении старого ${targetAsarPath}: ${unlinkError.message}.`);
             }
         }
         
-        await asar.createPackage(CONFIG.OUTPUT_DIR, currentAsarPath);
+        console.log(`📦 Упаковка модифицированной директории ${CONFIG.OUTPUT_DIR} в ${targetAsarPath}...`);
+        await asar.createPackage(CONFIG.OUTPUT_DIR, targetAsarPath);
+        console.log('✅ Патченный app.asar успешно создан (перезаписан).');
 
         if (fs.existsSync(CONFIG.OUTPUT_DIR)) {
             fs.rmSync(CONFIG.OUTPUT_DIR, { recursive: true, force: true });
         }
+
+        console.log('\n✨ Модификация и перепаковка Яндекс.Музыки завершена успешно!');
+
     } catch (err) {
-        console.error('❌Ошибка при модификации:', err.message);
+        console.error('❌ Ошибка при модификации:', err.message);
+        if (err.stack) {
+            console.error(err.stack);
+        }
+        if (err.stderr && typeof err.stderr.toString === 'function') {
+            console.error('Stderr:', err.stderr.toString());
+        }
+        
         if (originalCwd && process.cwd() !== originalCwd) {
             process.chdir(originalCwd);
         }
