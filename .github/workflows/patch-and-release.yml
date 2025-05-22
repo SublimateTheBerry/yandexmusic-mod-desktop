@@ -30,7 +30,7 @@ jobs:
 
     - run: |
         $installerPath = "${{ steps.download_installer.outputs.INSTALLER_PATH }}"
-        Start-Process -FilePath "$installerPath" -Wait
+        Start-Process -FilePath "$installerPath" -ArgumentList "/S" -Wait
       shell: pwsh
 
     - run: |
@@ -55,8 +55,10 @@ jobs:
     - id: generate_release_info
       run: |
         $patchedAsarPath = Join-Path "${{ github.workspace }}" "app.asar"
-        $timestamp = (Get-Date -Format "yyyy.MM.dd-HHmmss")
-        $version = "patched-$timestamp"
+        $baseVersion = "${{ github.event.inputs.yandex_music_version }}" # Базовая версия Я.Музыки
+        $timestamp = (Get-Date -Format "yyyyMMdd.HHmmss") # Формат для SemVer (без дефисов, только точки)
+        $version = "$baseVersion-patched.$timestamp" # Новый формат SemVer
+        
         echo "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
         echo "asar_file_name=app.asar" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
         echo "PATCHED_ASAR_TEMP_PATH=$patchedAsarPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
